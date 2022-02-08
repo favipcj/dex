@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"strings"
@@ -35,12 +34,18 @@ import (
 //       - admin
 //       # Prompt for username field
 //       usernamePrompt: Login
+//		 preferredUsernameField: name
 //
 type Config struct {
 	BaseURL      string   `json:"baseURL"`
 	ClientID     string   `json:"clientID"`
 	ClientSecret string   `json:"clientSecret"`
 	Groups       []string `json:"groups"`
+
+	// PreferredUsernameField allows users to set the field to any of the
+	// following values: "key", "name" or "email".
+	// If unset, the preferred_username field will remain empty.
+	PreferredUsernameField string `json:"preferredUsernameField"`
 
 	// UsernamePrompt allows users to override the username attribute (displayed
 	// in the username/password prompt). If unset, the handler will use.
@@ -105,7 +110,7 @@ func (c *crowdConnector) Login(ctx context.Context, s connector.Scopes, username
 
 	// We want to return a different error if the user's password is incorrect vs
 	// if there was an error.
-	incorrectPass := false
+	var incorrectPass bool
 	var user crowdUser
 
 	client := c.crowdAPIClient()
@@ -122,10 +127,7 @@ func (c *crowdConnector) Login(ctx context.Context, s connector.Scopes, username
 		return connector.Identity{}, false, err
 	}
 
-	if ident, err = c.identityFromCrowdUser(user); err != nil {
-		return connector.Identity{}, false, err
-	}
-
+	ident = c.identityFromCrowdUser(user)
 	if s.Groups {
 		userGroups, err := c.getGroups(ctx, client, s.Groups, ident.Username)
 		if err != nil {
@@ -159,10 +161,7 @@ func (c *crowdConnector) Refresh(ctx context.Context, s connector.Scopes, ident 
 		return ident, fmt.Errorf("crowd: get user %q: %v", data.Username, err)
 	}
 
-	newIdent, err := c.identityFromCrowdUser(user)
-	if err != nil {
-		return ident, err
-	}
+	newIdent := c.identityFromCrowdUser(user)
 	newIdent.ConnectorData = ident.ConnectorData
 
 	// If user exists, authenticate it to prolong sso session.
@@ -360,7 +359,7 @@ func (c *crowdConnector) groups(ctx context.Context, client *http.Client, userna
 }
 
 // identityFromCrowdUser converts crowdUser to Identity
-func (c *crowdConnector) identityFromCrowdUser(user crowdUser) (connector.Identity, error) {
+func (c *crowdConnector) identityFromCrowdUser(user crowdUser) connector.Identity {
 	identity := connector.Identity{
 		Username:      user.Name,
 		UserID:        user.Key,
@@ -368,7 +367,20 @@ func (c *crowdConnector) identityFromCrowdUser(user crowdUser) (connector.Identi
 		EmailVerified: true,
 	}
 
-	return identity, nil
+	switch c.PreferredUsernameField {
+	case "key":
+		identity.PreferredUsername = user.Key
+	case "name":
+		identity.PreferredUsername = user.Name
+	case "email":
+		identity.PreferredUsername = user.Email
+	default:
+		if c.PreferredUsernameField != "" {
+			c.logger.Warnf("preferred_username left empty. Invalid crowd field mapped to preferred_username: %s", c.PreferredUsernameField)
+		}
+	}
+
+	return identity
 }
 
 // getGroups retrieves a list of user's groups and filters it
@@ -419,7 +431,7 @@ func (c *crowdConnector) crowdUserManagementRequest(ctx context.Context, method 
 
 // validateCrowdResponse validates unique not JSON responses from API
 func (c *crowdConnector) validateCrowdResponse(resp *http.Response) ([]byte, error) {
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("crowd: read user body: %v", err)
 	}

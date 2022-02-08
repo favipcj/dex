@@ -8,9 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,8 +36,10 @@ const (
 
 // Pagination URL patterns
 // https://developer.github.com/v3/#pagination
-var reNext = regexp.MustCompile("<([^>]+)>; rel=\"next\"")
-var reLast = regexp.MustCompile("<([^>]+)>; rel=\"last\"")
+var (
+	reNext = regexp.MustCompile("<([^>]+)>; rel=\"next\"")
+	reLast = regexp.MustCompile("<([^>]+)>; rel=\"last\"")
+)
 
 // Config holds configuration options for github logins.
 type Config struct {
@@ -181,6 +184,7 @@ func (c *githubConnector) oauth2Config(scopes connector.Scopes) *oauth2.Config {
 		ClientSecret: c.clientSecret,
 		Endpoint:     endpoint,
 		Scopes:       githubScopes,
+		RedirectURL:  c.redirectURI,
 	}
 }
 
@@ -207,7 +211,7 @@ func (e *oauth2Error) Error() string {
 // newHTTPClient returns a new HTTP client that trusts the custom declared rootCA cert.
 func newHTTPClient(rootCA string) (*http.Client, error) {
 	tlsConfig := tls.Config{RootCAs: x509.NewCertPool()}
-	rootCABytes, err := ioutil.ReadFile(rootCA)
+	rootCABytes, err := os.ReadFile(rootCA)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read root-ca: %v", err)
 	}
@@ -333,11 +337,12 @@ func (c *githubConnector) Refresh(ctx context.Context, s connector.Scopes, ident
 
 // getGroups retrieves GitHub orgs and teams a user is in, if any.
 func (c *githubConnector) getGroups(ctx context.Context, client *http.Client, groupScope bool, userLogin string) ([]string, error) {
-	if len(c.orgs) > 0 {
+	switch {
+	case len(c.orgs) > 0:
 		return c.groupsForOrgs(ctx, client, userLogin)
-	} else if c.org != "" {
+	case c.org != "":
 		return c.teamsForOrg(ctx, client, c.org)
-	} else if groupScope && c.loadAllGroups {
+	case groupScope && c.loadAllGroups:
 		return c.userGroups(ctx, client)
 	}
 	return nil, nil
@@ -484,7 +489,7 @@ func get(ctx context.Context, client *http.Client, apiURL string, v interface{})
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, err := ioutil.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return "", fmt.Errorf("github: read body: %v", err)
 		}
@@ -624,7 +629,6 @@ func (c *githubConnector) userInOrg(ctx context.Context, client *http.Client, us
 	apiURL := fmt.Sprintf("%s/orgs/%s/members/%s", c.apiURL, orgName, userName)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
-
 	if err != nil {
 		return false, fmt.Errorf("github: new req: %v", err)
 	}

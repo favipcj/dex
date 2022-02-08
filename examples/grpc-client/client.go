@@ -6,18 +6,18 @@ import (
 	"crypto/x509"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
+	"os"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/dexidp/dex/api"
+	"github.com/dexidp/dex/api/v2"
 )
 
 func newDexClient(hostAndPort, caPath, clientCrt, clientKey string) (api.DexClient, error) {
 	cPool := x509.NewCertPool()
-	caCert, err := ioutil.ReadFile(caPath)
+	caCert, err := os.ReadFile(caPath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid CA crt file: %s", caPath)
 	}

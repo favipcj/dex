@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"reflect"
@@ -34,12 +34,6 @@ var (
 	usersURL         = ""
 	groupsURL        = ""
 )
-
-type userResponse struct {
-	User struct {
-		ID string `json:"id"`
-	} `json:"user"`
-}
 
 type groupResponse struct {
 	Group struct {
@@ -84,13 +78,13 @@ func getAdminToken(t *testing.T, adminName, adminPass string) (token, id string)
 
 	token = resp.Header.Get("X-Subject-Token")
 
-	data, err := ioutil.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 
-	var tokenResp = new(tokenResponse)
+	tokenResp := new(tokenResponse)
 	err = json.Unmarshal(data, &tokenResp)
 	if err != nil {
 		t.Fatal(err)
@@ -128,13 +122,13 @@ func createUser(t *testing.T, token, userName, userEmail, userPass string) strin
 		t.Fatal(err)
 	}
 
-	data, err := ioutil.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 
-	var userResp = new(userResponse)
+	userResp := new(userResponse)
 	err = json.Unmarshal(data, &userResp)
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +138,7 @@ func createUser(t *testing.T, token, userName, userEmail, userPass string) strin
 }
 
 // delete group or user
-func delete(t *testing.T, token, id, uri string) {
+func deleteResource(t *testing.T, token, id, uri string) {
 	t.Helper()
 	client := &http.Client{}
 
@@ -189,13 +183,13 @@ func createGroup(t *testing.T, token, description, name string) string {
 		t.Fatal(err)
 	}
 
-	data, err := ioutil.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 
-	var groupResp = new(groupResponse)
+	groupResp := new(groupResponse)
 	err = json.Unmarshal(data, &groupResp)
 	if err != nil {
 		t.Fatal(err)
@@ -225,8 +219,10 @@ func addUserToGroup(t *testing.T, token, groupID, userID string) error {
 
 func TestIncorrectCredentialsLogin(t *testing.T) {
 	setupVariables(t)
-	c := conn{Host: keystoneURL, Domain: testDomain,
-		AdminUsername: adminUser, AdminPassword: adminPass}
+	c := conn{
+		Host: keystoneURL, Domain: testDomain,
+		AdminUsername: adminUser, AdminPassword: adminPass,
+	}
 	s := connector.Scopes{OfflineAccess: true, Groups: true}
 	_, validPW, err := c.Login(context.Background(), s, adminUser, invalidPass)
 
@@ -246,20 +242,88 @@ func TestIncorrectCredentialsLogin(t *testing.T) {
 func TestValidUserLogin(t *testing.T) {
 	setupVariables(t)
 	token, _ := getAdminToken(t, adminUser, adminPass)
-	userID := createUser(t, token, testUser, testEmail, testPass)
-	c := conn{Host: keystoneURL, Domain: testDomain,
-		AdminUsername: adminUser, AdminPassword: adminPass}
-	s := connector.Scopes{OfflineAccess: true, Groups: true}
-	identity, validPW, err := c.Login(context.Background(), s, testUser, testPass)
-	if err != nil {
-		t.Fatal(err.Error())
-	}
-	t.Log(identity)
 
-	if !validPW {
-		t.Fatal("Valid password was not accepted")
+	type tUser struct {
+		username string
+		domain   string
+		email    string
+		password string
 	}
-	delete(t, token, userID, usersURL)
+
+	type expect struct {
+		username      string
+		email         string
+		verifiedEmail bool
+	}
+
+	tests := []struct {
+		name     string
+		input    tUser
+		expected expect
+	}{
+		{
+			name: "test with email address",
+			input: tUser{
+				username: testUser,
+				domain:   testDomain,
+				email:    testEmail,
+				password: testPass,
+			},
+			expected: expect{
+				username:      testUser,
+				email:         testEmail,
+				verifiedEmail: true,
+			},
+		},
+		{
+			name: "test without email address",
+			input: tUser{
+				username: testUser,
+				domain:   testDomain,
+				email:    "",
+				password: testPass,
+			},
+			expected: expect{
+				username:      testUser,
+				email:         "",
+				verifiedEmail: false,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			userID := createUser(t, token, tt.input.username, tt.input.email, tt.input.password)
+			defer deleteResource(t, token, userID, usersURL)
+
+			c := conn{
+				Host: keystoneURL, Domain: tt.input.domain,
+				AdminUsername: adminUser, AdminPassword: adminPass,
+			}
+			s := connector.Scopes{OfflineAccess: true, Groups: true}
+			identity, validPW, err := c.Login(context.Background(), s, tt.input.username, tt.input.password)
+			if err != nil {
+				t.Fatal(err.Error())
+			}
+			t.Log(identity)
+			if identity.Username != tt.expected.username {
+				t.Fatalf("Invalid user. Got: %v. Wanted: %v", identity.Username, tt.expected.username)
+			}
+			if identity.UserID == "" {
+				t.Fatalf("Didn't get any UserID back")
+			}
+			if identity.Email != tt.expected.email {
+				t.Fatalf("Invalid email. Got: %v. Wanted: %v", identity.Email, tt.expected.email)
+			}
+			if identity.EmailVerified != tt.expected.verifiedEmail {
+				t.Fatalf("Invalid verifiedEmail. Got: %v. Wanted: %v", identity.EmailVerified, tt.expected.verifiedEmail)
+			}
+
+			if !validPW {
+				t.Fatal("Valid password was not accepted")
+			}
+		})
+	}
 }
 
 func TestUseRefreshToken(t *testing.T) {
@@ -267,9 +331,12 @@ func TestUseRefreshToken(t *testing.T) {
 	token, adminID := getAdminToken(t, adminUser, adminPass)
 	groupID := createGroup(t, token, "Test group description", testGroup)
 	addUserToGroup(t, token, groupID, adminID)
+	defer deleteResource(t, token, groupID, groupsURL)
 
-	c := conn{Host: keystoneURL, Domain: testDomain,
-		AdminUsername: adminUser, AdminPassword: adminPass}
+	c := conn{
+		Host: keystoneURL, Domain: testDomain,
+		AdminUsername: adminUser, AdminPassword: adminPass,
+	}
 	s := connector.Scopes{OfflineAccess: true, Groups: true}
 
 	identityLogin, _, err := c.Login(context.Background(), s, adminUser, adminPass)
@@ -282,8 +349,6 @@ func TestUseRefreshToken(t *testing.T) {
 		t.Fatal(err.Error())
 	}
 
-	delete(t, token, groupID, groupsURL)
-
 	expectEquals(t, 1, len(identityRefresh.Groups))
 	expectEquals(t, testGroup, identityRefresh.Groups[0])
 }
@@ -293,8 +358,10 @@ func TestUseRefreshTokenUserDeleted(t *testing.T) {
 	token, _ := getAdminToken(t, adminUser, adminPass)
 	userID := createUser(t, token, testUser, testEmail, testPass)
 
-	c := conn{Host: keystoneURL, Domain: testDomain,
-		AdminUsername: adminUser, AdminPassword: adminPass}
+	c := conn{
+		Host: keystoneURL, Domain: testDomain,
+		AdminUsername: adminUser, AdminPassword: adminPass,
+	}
 	s := connector.Scopes{OfflineAccess: true, Groups: true}
 
 	identityLogin, _, err := c.Login(context.Background(), s, testUser, testPass)
@@ -307,7 +374,7 @@ func TestUseRefreshTokenUserDeleted(t *testing.T) {
 		t.Fatal(err.Error())
 	}
 
-	delete(t, token, userID, usersURL)
+	deleteResource(t, token, userID, usersURL)
 	_, err = c.Refresh(context.Background(), s, identityLogin)
 
 	if !strings.Contains(err.Error(), "does not exist") {
@@ -319,9 +386,12 @@ func TestUseRefreshTokenGroupsChanged(t *testing.T) {
 	setupVariables(t)
 	token, _ := getAdminToken(t, adminUser, adminPass)
 	userID := createUser(t, token, testUser, testEmail, testPass)
+	defer deleteResource(t, token, userID, usersURL)
 
-	c := conn{Host: keystoneURL, Domain: testDomain,
-		AdminUsername: adminUser, AdminPassword: adminPass}
+	c := conn{
+		Host: keystoneURL, Domain: testDomain,
+		AdminUsername: adminUser, AdminPassword: adminPass,
+	}
 	s := connector.Scopes{OfflineAccess: true, Groups: true}
 
 	identityLogin, _, err := c.Login(context.Background(), s, testUser, testPass)
@@ -338,14 +408,12 @@ func TestUseRefreshTokenGroupsChanged(t *testing.T) {
 
 	groupID := createGroup(t, token, "Test group", testGroup)
 	addUserToGroup(t, token, groupID, userID)
+	defer deleteResource(t, token, groupID, groupsURL)
 
 	identityRefresh, err = c.Refresh(context.Background(), s, identityLogin)
 	if err != nil {
 		t.Fatal(err.Error())
 	}
-
-	delete(t, token, groupID, groupsURL)
-	delete(t, token, userID, usersURL)
 
 	expectEquals(t, 1, len(identityRefresh.Groups))
 }
@@ -354,13 +422,17 @@ func TestNoGroupsInScope(t *testing.T) {
 	setupVariables(t)
 	token, _ := getAdminToken(t, adminUser, adminPass)
 	userID := createUser(t, token, testUser, testEmail, testPass)
+	defer deleteResource(t, token, userID, usersURL)
 
-	c := conn{Host: keystoneURL, Domain: testDomain,
-		AdminUsername: adminUser, AdminPassword: adminPass}
+	c := conn{
+		Host: keystoneURL, Domain: testDomain,
+		AdminUsername: adminUser, AdminPassword: adminPass,
+	}
 	s := connector.Scopes{OfflineAccess: true, Groups: false}
 
 	groupID := createGroup(t, token, "Test group", testGroup)
 	addUserToGroup(t, token, groupID, userID)
+	defer deleteResource(t, token, groupID, groupsURL)
 
 	identityLogin, _, err := c.Login(context.Background(), s, testUser, testPass)
 	if err != nil {
@@ -373,9 +445,6 @@ func TestNoGroupsInScope(t *testing.T) {
 		t.Fatal(err.Error())
 	}
 	expectEquals(t, 0, len(identityRefresh.Groups))
-
-	delete(t, token, groupID, groupsURL)
-	delete(t, token, userID, usersURL)
 }
 
 func setupVariables(t *testing.T) {
