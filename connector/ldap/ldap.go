@@ -7,10 +7,11 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
+	"strings"
 
-	"gopkg.in/ldap.v2"
+	"github.com/go-ldap/ldap/v3"
 
 	"github.com/dexidp/dex/connector"
 	"github.com/dexidp/dex/pkg/log"
@@ -29,7 +30,7 @@ import (
 //       # The following field is required if using port 389.
 //       # insecureNoSSL: true
 //       rootCA: /etc/dex/ldap.ca
-//       bindDN: uid=seviceaccount,cn=users,dc=example,dc=com
+//       bindDN: uid=serviceaccount,cn=users,dc=example,dc=com
 //       bindPW: password
 //       userSearch:
 //         # Would translate to the query "(&(objectClass=person)(uid=<username>))"
@@ -56,11 +57,13 @@ import (
 //         nameAttr: name
 //
 
+// UserMatcher holds information about user and group matching.
 type UserMatcher struct {
 	UserAttr  string `json:"userAttr"`
 	GroupAttr string `json:"groupAttr"`
 }
 
+// Config holds configuration options for LDAP logins.
 type Config struct {
 	// The host and optional port of the LDAP server. If port isn't supplied, it will be
 	// guessed based on the TLS configuration. 389 or 636.
@@ -217,7 +220,8 @@ func (c *Config) OpenConnector(logger log.Logger) (interface {
 	connector.Connector
 	connector.PasswordConnector
 	connector.RefreshConnector
-}, error) {
+}, error,
+) {
 	return c.openConnector(logger)
 }
 
@@ -244,9 +248,9 @@ func (c *Config) openConnector(logger log.Logger) (*ldapConnector, error) {
 	if host, _, err = net.SplitHostPort(c.Host); err != nil {
 		host = c.Host
 		if c.InsecureNoSSL {
-			c.Host = c.Host + ":389"
+			c.Host += ":389"
 		} else {
-			c.Host = c.Host + ":636"
+			c.Host += ":636"
 		}
 	}
 
@@ -255,7 +259,7 @@ func (c *Config) openConnector(logger log.Logger) (*ldapConnector, error) {
 		data := c.RootCAData
 		if len(data) == 0 {
 			var err error
-			if data, err = ioutil.ReadFile(c.RootCA); err != nil {
+			if data, err = os.ReadFile(c.RootCA); err != nil {
 				return nil, fmt.Errorf("ldap: read ca file: %v", err)
 			}
 		}
@@ -281,6 +285,9 @@ func (c *Config) openConnector(logger log.Logger) (*ldapConnector, error) {
 	if !ok {
 		return nil, fmt.Errorf("groupSearch.Scope unknown value %q", c.GroupSearch.Scope)
 	}
+
+	// TODO(nabokihms): remove it after deleting deprecated groupSearch options
+	c.GroupSearch.UserMatchers = userMatchers(c, logger)
 	return &ldapConnector{*c, userSearchScope, groupSearchScope, tlsConfig, logger}, nil
 }
 
@@ -303,7 +310,7 @@ var (
 // do initializes a connection to the LDAP directory and passes it to the
 // provided function. It then performs appropriate teardown or reuse before
 // returning.
-func (c *ldapConnector) do(ctx context.Context, f func(c *ldap.Conn) error) error {
+func (c *ldapConnector) do(_ context.Context, f func(c *ldap.Conn) error) error {
 	// TODO(ericchiang): support context here
 	var (
 		conn *ldap.Conn
@@ -329,31 +336,34 @@ func (c *ldapConnector) do(ctx context.Context, f func(c *ldap.Conn) error) erro
 	defer conn.Close()
 
 	// If bindDN and bindPW are empty this will default to an anonymous bind.
-	if err := conn.Bind(c.BindDN, c.BindPW); err != nil {
-		if c.BindDN == "" && c.BindPW == "" {
+	if c.BindDN == "" && c.BindPW == "" {
+		if err := conn.UnauthenticatedBind(""); err != nil {
 			return fmt.Errorf("ldap: initial anonymous bind failed: %v", err)
 		}
+	} else if err := conn.Bind(c.BindDN, c.BindPW); err != nil {
 		return fmt.Errorf("ldap: initial bind for user %q failed: %v", c.BindDN, err)
 	}
 
 	return f(conn)
 }
 
-func getAttrs(e ldap.Entry, name string) []string {
+func (c *ldapConnector) getAttrs(e ldap.Entry, name string) []string {
 	for _, a := range e.Attributes {
 		if a.Name != name {
 			continue
 		}
 		return a.Values
 	}
-	if name == "DN" {
+	if strings.ToLower(name) == "dn" {
 		return []string{e.DN}
 	}
+
+	c.logger.Debugf("%q attribute is not fround in entry", name)
 	return nil
 }
 
-func getAttr(e ldap.Entry, name string) string {
-	if a := getAttrs(e, name); len(a) > 0 {
+func (c *ldapConnector) getAttr(e ldap.Entry, name string) string {
+	if a := c.getAttrs(e, name); len(a) > 0 {
 		return a[0]
 	}
 	return ""
@@ -365,25 +375,25 @@ func (c *ldapConnector) identityFromEntry(user ldap.Entry) (ident connector.Iden
 	missing := []string{}
 
 	// Fill the identity struct using the attributes from the user entry.
-	if ident.UserID = getAttr(user, c.UserSearch.IDAttr); ident.UserID == "" {
+	if ident.UserID = c.getAttr(user, c.UserSearch.IDAttr); ident.UserID == "" {
 		missing = append(missing, c.UserSearch.IDAttr)
 	}
 
 	if c.UserSearch.NameAttr != "" {
-		if ident.Username = getAttr(user, c.UserSearch.NameAttr); ident.Username == "" {
+		if ident.Username = c.getAttr(user, c.UserSearch.NameAttr); ident.Username == "" {
 			missing = append(missing, c.UserSearch.NameAttr)
 		}
 	}
 
 	if c.UserSearch.PreferredUsernameAttrAttr != "" {
-		if ident.PreferredUsername = getAttr(user, c.UserSearch.PreferredUsernameAttrAttr); ident.PreferredUsername == "" {
+		if ident.PreferredUsername = c.getAttr(user, c.UserSearch.PreferredUsernameAttrAttr); ident.PreferredUsername == "" {
 			missing = append(missing, c.UserSearch.PreferredUsernameAttrAttr)
 		}
 	}
 
 	if c.UserSearch.EmailSuffix != "" {
 		ident.Email = ident.Username + "@" + c.UserSearch.EmailSuffix
-	} else if ident.Email = getAttr(user, c.UserSearch.EmailAttr); ident.Email == "" {
+	} else if ident.Email = c.getAttr(user, c.UserSearch.EmailAttr); ident.Email == "" {
 		missing = append(missing, c.UserSearch.EmailAttr)
 	}
 	// TODO(ericchiang): Let this value be set from an attribute.
@@ -567,7 +577,7 @@ func (c *ldapConnector) Refresh(ctx context.Context, s connector.Scopes, ident c
 
 func (c *ldapConnector) groups(ctx context.Context, user ldap.Entry) ([]string, error) {
 	if c.GroupSearch.BaseDN == "" {
-		c.logger.Debugf("No groups returned for %q because no groups baseDN has been configured.", getAttr(user, c.UserSearch.NameAttr))
+		c.logger.Debugf("No groups returned for %q because no groups baseDN has been configured.", c.getAttr(user, c.UserSearch.NameAttr))
 		return nil, nil
 	}
 
@@ -579,6 +589,12 @@ func (c *ldapConnector) groups(ctx context.Context, user ldap.Entry) ([]string, 
 				filter = fmt.Sprintf("(&%s%s)", c.GroupSearch.Filter, filter)
 			}
 
+			req := &ldap.SearchRequest{
+				BaseDN:     c.GroupSearch.BaseDN,
+				Filter:     filter,
+				Scope:      c.groupSearchScope,
+				Attributes: []string{c.GroupSearch.NameAttr},
+			}
 			req := &ldap.SearchRequest{
 				BaseDN:     c.GroupSearch.BaseDN,
 				Filter:     filter,
@@ -606,12 +622,32 @@ func (c *ldapConnector) groups(ctx context.Context, user ldap.Entry) ([]string, 
 			}
 		}
 	}
+			gotGroups := false
+			if err := c.do(ctx, func(conn *ldap.Conn) error {
+				c.logger.Infof("performing ldap search %s %s %s",
+					req.BaseDN, scopeString(req.Scope), req.Filter)
+				resp, err := conn.Search(req)
+				if err != nil {
+					return fmt.Errorf("ldap: search failed: %v", err)
+				}
+				gotGroups = len(resp.Entries) != 0
+				groups = append(groups, resp.Entries...)
+				return nil
+			}); err != nil {
+				return nil, err
+			}
+			if !gotGroups {
+				// TODO(ericchiang): Is this going to spam the logs?
+				c.logger.Errorf("ldap: groups search with filter %q returned no groups", filter)
+			}
+		}
+	}
 
-	var groupNames []string
+	groupNames := make([]string, 0, len(groups))
 	for _, group := range groups {
-		name := getAttr(*group, c.GroupSearch.NameAttr)
+		name := c.getAttr(*group, c.GroupSearch.NameAttr)
 		if name == "" {
-			// Be obnoxious about missing missing attributes. If the group entry is
+			// Be obnoxious about missing attributes. If the group entry is
 			// missing its name attribute, that indicates a misconfiguration.
 			//
 			// In the future we can add configuration options to just log these errors.
