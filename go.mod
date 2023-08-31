@@ -42,6 +42,14 @@ require (
 )
 
 require (
+	github.com/golang/snappy v0.0.4 // indirect
+	github.com/opentracing/opentracing-go v1.2.0 // indirect
+	gopkg.in/couchbase/gocbcore.v7 v7.1.18 // indirect
+	gopkg.in/couchbaselabs/gocbconnstr.v1 v1.0.4 // indirect
+	gopkg.in/couchbaselabs/jsonx.v1 v1.0.1 // indirect
+)
+
+require (
 	ariga.io/atlas v0.10.2-0.20230427182402-87a07dfb83bf // indirect
 	cloud.google.com/go/compute v1.23.0 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
@@ -95,9 +103,9 @@ require (
 	google.golang.org/genproto v0.0.0-20230803162519-f966b187b2e5 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230803162519-f966b187b2e5 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230807174057-1744710a1577 // indirect
+	gopkg.in/couchbase/gocb.v1 v1.6.3
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	gopkg.in/couchbase/gocb.v1 v1.6.3
 )
 
 replace github.com/dexidp/dex/api/v2 => ./api/v2
