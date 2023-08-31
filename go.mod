@@ -97,6 +97,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230807174057-1744710a1577 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gopkg.in/couchbase/gocb.v1 v1.6.3
 )
 
 replace github.com/dexidp/dex/api/v2 => ./api/v2
