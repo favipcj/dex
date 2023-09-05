@@ -188,16 +188,17 @@ func parseScope(s string) (int, bool) {
 // Function exists here to allow backward compatibility between old and new
 // group to user matching implementations.
 // See "Config.GroupSearch.UserMatchers" comments for the details
-func (c *ldapConnector) userMatchers() []UserMatcher {
+func userMatchers(c *Config, logger log.Logger) []UserMatcher {
 	if len(c.GroupSearch.UserMatchers) > 0 && c.GroupSearch.UserMatchers[0].UserAttr != "" {
-		return c.GroupSearch.UserMatchers[:]
-	} else {
-		return []UserMatcher{
-			{
-				UserAttr:  c.GroupSearch.UserAttr,
-				GroupAttr: c.GroupSearch.GroupAttr,
-			},
-		}
+		return c.GroupSearch.UserMatchers
+	}
+
+	log.Deprecated(logger, `LDAP: use groupSearch.userMatchers option instead of "userAttr/groupAttr" fields.`)
+	return []UserMatcher{
+		{
+			UserAttr:  c.GroupSearch.UserAttr,
+			GroupAttr: c.GroupSearch.GroupAttr,
+		},
 	}
 }
 
@@ -425,7 +426,7 @@ func (c *ldapConnector) userEntry(conn *ldap.Conn, username string) (user ldap.E
 		},
 	}
 
-	for _, matcher := range c.userMatchers() {
+	for _, matcher := range c.GroupSearch.UserMatchers {
 		req.Attributes = append(req.Attributes, matcher.UserAttr)
 	}
 
@@ -582,8 +583,8 @@ func (c *ldapConnector) groups(ctx context.Context, user ldap.Entry) ([]string, 
 	}
 
 	var groups []*ldap.Entry
-	for _, matcher := range c.userMatchers() {
-		for _, attr := range getAttrs(user, matcher.UserAttr) {
+	for _, matcher := range c.GroupSearch.UserMatchers {
+		for _, attr := range c.getAttrs(user, matcher.UserAttr) {
 			filter := fmt.Sprintf("(%s=%s)", matcher.GroupAttr, ldap.EscapeFilter(attr))
 			if c.GroupSearch.Filter != "" {
 				filter = fmt.Sprintf("(&%s%s)", c.GroupSearch.Filter, filter)
@@ -595,33 +596,7 @@ func (c *ldapConnector) groups(ctx context.Context, user ldap.Entry) ([]string, 
 				Scope:      c.groupSearchScope,
 				Attributes: []string{c.GroupSearch.NameAttr},
 			}
-			req := &ldap.SearchRequest{
-				BaseDN:     c.GroupSearch.BaseDN,
-				Filter:     filter,
-				Scope:      c.groupSearchScope,
-				Attributes: []string{c.GroupSearch.NameAttr},
-			}
 
-			gotGroups := false
-			if err := c.do(ctx, func(conn *ldap.Conn) error {
-				c.logger.Infof("performing ldap search %s %s %s",
-					req.BaseDN, scopeString(req.Scope), req.Filter)
-				resp, err := conn.Search(req)
-				if err != nil {
-					return fmt.Errorf("ldap: search failed: %v", err)
-				}
-				gotGroups = len(resp.Entries) != 0
-				groups = append(groups, resp.Entries...)
-				return nil
-			}); err != nil {
-				return nil, err
-			}
-			if !gotGroups {
-				// TODO(ericchiang): Is this going to spam the logs?
-				c.logger.Errorf("ldap: groups search with filter %q returned no groups", filter)
-			}
-		}
-	}
 			gotGroups := false
 			if err := c.do(ctx, func(conn *ldap.Conn) error {
 				c.logger.Infof("performing ldap search %s %s %s",

@@ -305,6 +305,17 @@ func (s *Server) handleConnectorLogin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getTrueIPAddress takes two values: the immediate remoteAddress of the connection
+// and the X-Real-IP header. Either the real ip header will be taken or the remote
+// address (which usually does not work well).
+func (s *Server) getTrueIPAddress(realIP, remoteAddress string) string {
+	if realIP != "" {
+		return realIP
+	} else {
+		return remoteAddress
+	}
+}
+
 func (s *Server) handlePasswordLogin(w http.ResponseWriter, r *http.Request) {
 	authID := r.URL.Query().Get("state")
 	if authID == "" {
