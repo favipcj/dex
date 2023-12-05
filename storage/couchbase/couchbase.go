@@ -515,3 +515,35 @@ func (c *conn) GarbageCollect(now time.Time) (result storage.GCResult, err error
 	// nothing here, becuase an expiry time is set for the authrequest and authcode documents using touch
 	return
 }
+
+func (c *conn) CreateDeviceRequest(d storage.DeviceRequest) error {
+	return nil
+}
+func (c *conn) CreateDeviceToken(t storage.DeviceToken) error {
+	return nil
+}
+
+func (c *conn) GetDeviceRequest(userCode string) (storage.DeviceRequest, error) {
+	return storage.DeviceRequest{
+		UserCode:     "",
+		DeviceCode:   "",
+		ClientID:     "",
+		ClientSecret: "",
+		Scopes:       nil,
+		Expiry:       time.Time{},
+	}, nil
+}
+func (c *conn) GetDeviceToken(deviceCode string) (storage.DeviceToken, error) {
+	return storage.DeviceToken{
+		DeviceCode:          "",
+		Status:              "",
+		Token:               "",
+		Expiry:              time.Time{},
+		LastRequestTime:     time.Time{},
+		PollIntervalSeconds: 0,
+		PKCE:                storage.PKCE{},
+	}, nil
+}
+func (c *conn) UpdateDeviceToken(deviceCode string, updater func(old storage.DeviceToken) (storage.DeviceToken, error)) error {
+	return nil
+}
