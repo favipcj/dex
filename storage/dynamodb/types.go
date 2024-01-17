@@ -14,7 +14,7 @@ type Client struct {
 
 type AuthCode struct {
 	AuthCode    storage.AuthCode
-	TTL         uint32
+	TTL         int64
 	ContentType string
 	ID          string
 }
@@ -27,7 +27,7 @@ type RefreshToken struct {
 
 type AuthRequest struct {
 	Request     storage.AuthRequest
-	TTL         uint32
+	TTL         int64
 	ContentType string
 	ID          string
 }
@@ -53,8 +53,13 @@ type Connector struct {
 type Keys struct {
 	SigningKey       []byte
 	SigningKeyPub    []byte
-	VerificationKeys []storage.VerificationKey
+	VerificationKeys []VerificationKey
 	NextRotation     time.Time
 	ContentType      string
 	ID               string
+}
+
+type VerificationKey struct {
+	Key    []byte
+	Expiry time.Time
 }

@@ -98,7 +98,7 @@ func (c *conn) updateItem(contentType string, id string, expr expression.Express
 }
 
 func (c *conn) CreateAuthRequest(a storage.AuthRequest) error {
-	var ttl = uint32(time.Until(a.Expiry).Seconds())
+	var ttl = a.Expiry.Unix()
 	authRequestDbd := AuthRequest{
 		Request:     a,
 		TTL:         ttl,
@@ -130,7 +130,7 @@ func (c *conn) CreateClient(cli storage.Client) error {
 }
 
 func (c *conn) CreateAuthCode(code storage.AuthCode) error {
-	ttl := uint32(time.Until(code.Expiry).Seconds())
+	ttl := code.Expiry.Unix()
 	codeDbd := AuthCode{
 		AuthCode:    code,
 		ContentType: authCodeKey,
@@ -283,8 +283,14 @@ func (c *conn) GetKeys() (storage.Keys, error) {
 
 	keys.SigningKey = &signingKey
 	keys.SigningKeyPub = &signingKeyPub
-	keys.VerificationKeys = keyResp.VerificationKeys
 	keys.NextRotation = keyResp.NextRotation
+	keys.VerificationKeys = make([]storage.VerificationKey, len(keyResp.VerificationKeys))
+	for i, v := range keyResp.VerificationKeys {
+		keys.VerificationKeys[i].Expiry = v.Expiry
+		var tempKey jose.JSONWebKey
+		tempKey.UnmarshalJSON(v.Key)
+		keys.VerificationKeys[i].PublicKey = &tempKey
+	}
 
 	if err != nil {
 		c.logger.Infof("%v\n", err)
@@ -564,15 +570,27 @@ func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) 
 
 	var item Keys
 	err = attributevalue.UnmarshalMap(resp.Item, &item)
-	var signingKey *jose.JSONWebKey
+	var signingKey jose.JSONWebKey
 	signingKey.UnmarshalJSON(item.SigningKey)
-	var signingKeyPub *jose.JSONWebKey
+	var signingKeyPub jose.JSONWebKey
 	signingKey.UnmarshalJSON(item.SigningKeyPub)
+
+	verifyKeys := make([]storage.VerificationKey, len(item.VerificationKeys))
+
+	for i, v := range item.VerificationKeys {
+		var tempKey jose.JSONWebKey
+		tempKey.UnmarshalJSON(v.Key)
+		verifyKeys[i] = storage.VerificationKey{
+			PublicKey: &tempKey,
+			Expiry:    v.Expiry,
+		}
+	}
+
 	keys := storage.Keys{
-		SigningKey:       signingKey,
-		SigningKeyPub:    signingKeyPub,
+		SigningKey:       &signingKey,
+		SigningKeyPub:    &signingKeyPub,
 		NextRotation:     item.NextRotation,
-		VerificationKeys: item.VerificationKeys,
+		VerificationKeys: verifyKeys,
 	}
 
 	if err != nil {
@@ -587,12 +605,22 @@ func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) 
 	signingKeyBytes, _ := nc.SigningKey.MarshalJSON()
 	signingKeyPubBytes, _ := nc.SigningKeyPub.MarshalJSON()
 
+	ncVerifyKeys := make([]VerificationKey, len(nc.VerificationKeys))
+
+	for i, v := range nc.VerificationKeys {
+		pbBytes, _ := v.PublicKey.MarshalJSON()
+		ncVerifyKeys[i] = VerificationKey{
+			Key:    pbBytes,
+			Expiry: v.Expiry,
+		}
+	}
+
 	new_key := Keys{
 		ContentType:      keysName,
 		ID:               keysName,
 		SigningKey:       signingKeyBytes,
 		SigningKeyPub:    signingKeyPubBytes,
-		VerificationKeys: nc.VerificationKeys,
+		VerificationKeys: ncVerifyKeys,
 		NextRotation:     nc.NextRotation,
 	}
 
