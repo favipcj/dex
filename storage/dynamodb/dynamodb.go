@@ -38,6 +38,53 @@ func keySession(prefix string, id string, connId string) string {
 	return prefix + "-" + strings.ToLower(id+"-"+connId)
 }
 
+func toStorageKey(key Keys) storage.Keys {
+	var storageKey storage.Keys
+
+	var signingKey jose.JSONWebKey
+	signingKey.UnmarshalJSON(key.SigningKey)
+	var signingKeyPub jose.JSONWebKey
+	signingKeyPub.UnmarshalJSON(key.SigningKeyPub)
+
+	storageKey.SigningKey = &signingKey
+	storageKey.SigningKeyPub = &signingKeyPub
+	storageKey.NextRotation = key.NextRotation
+	storageKey.VerificationKeys = make([]storage.VerificationKey, len(key.VerificationKeys))
+
+	for i, v := range key.VerificationKeys {
+		storageKey.VerificationKeys[i].Expiry = v.Expiry
+		var tempKey jose.JSONWebKey
+		tempKey.UnmarshalJSON(v.Key)
+		storageKey.VerificationKeys[i].PublicKey = &tempKey
+	}
+
+	return storageKey
+}
+
+func toDynamoKey(storageKey storage.Keys) Keys {
+	signingKeyBytes, _ := storageKey.SigningKey.MarshalJSON()
+	signingKeyPubBytes, _ := storageKey.SigningKeyPub.MarshalJSON()
+
+	verificationKeys := make([]VerificationKey, len(storageKey.VerificationKeys))
+
+	for i, v := range storageKey.VerificationKeys {
+		pbBytes, _ := v.PublicKey.MarshalJSON()
+		verificationKeys[i] = VerificationKey{
+			Key:    pbBytes,
+			Expiry: v.Expiry,
+		}
+	}
+
+	return Keys{
+		ContentType:      keysName,
+		ID:               keysName,
+		SigningKey:       signingKeyBytes,
+		SigningKeyPub:    signingKeyPubBytes,
+		VerificationKeys: verificationKeys,
+		NextRotation:     storageKey.NextRotation,
+	}
+}
+
 func (c *conn) Close() error {
 	return nil
 }
@@ -66,8 +113,6 @@ func (c *conn) getItem(content_type string, id string) (*dynamodb.GetItemOutput,
 }
 
 func (c *conn) deleteItem(content_type string, id string) error {
-	c.logger.Infof("Deleting item (ID: %v, ContentType: %v)\n", id, content_type)
-
 	_, err := c.db.DeleteItem(context.TODO(), &dynamodb.DeleteItemInput{
 		Key: map[string]types.AttributeValue{
 			"ContentType": &types.AttributeValueMemberS{Value: content_type},
@@ -276,27 +321,13 @@ func (c *conn) GetKeys() (storage.Keys, error) {
 	var keyResp Keys
 	err = attributevalue.UnmarshalMap(resp.Item, &keyResp)
 
-	var signingKey jose.JSONWebKey
-	signingKey.UnmarshalJSON(keyResp.SigningKey)
-	var signingKeyPub jose.JSONWebKey
-	signingKeyPub.UnmarshalJSON(keyResp.SigningKeyPub)
-
-	keys.SigningKey = &signingKey
-	keys.SigningKeyPub = &signingKeyPub
-	keys.NextRotation = keyResp.NextRotation
-	keys.VerificationKeys = make([]storage.VerificationKey, len(keyResp.VerificationKeys))
-	for i, v := range keyResp.VerificationKeys {
-		keys.VerificationKeys[i].Expiry = v.Expiry
-		var tempKey jose.JSONWebKey
-		tempKey.UnmarshalJSON(v.Key)
-		keys.VerificationKeys[i].PublicKey = &tempKey
-	}
+	storageKey := toStorageKey(keyResp)
 
 	if err != nil {
 		c.logger.Infof("%v\n", err)
 	}
 
-	return keys, err
+	return storageKey, err
 }
 
 func (c *conn) GetRefresh(id string) (storage.RefreshToken, error) {
@@ -570,28 +601,7 @@ func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) 
 
 	var item Keys
 	err = attributevalue.UnmarshalMap(resp.Item, &item)
-	var signingKey jose.JSONWebKey
-	signingKey.UnmarshalJSON(item.SigningKey)
-	var signingKeyPub jose.JSONWebKey
-	signingKey.UnmarshalJSON(item.SigningKeyPub)
-
-	verifyKeys := make([]storage.VerificationKey, len(item.VerificationKeys))
-
-	for i, v := range item.VerificationKeys {
-		var tempKey jose.JSONWebKey
-		tempKey.UnmarshalJSON(v.Key)
-		verifyKeys[i] = storage.VerificationKey{
-			PublicKey: &tempKey,
-			Expiry:    v.Expiry,
-		}
-	}
-
-	keys := storage.Keys{
-		SigningKey:       &signingKey,
-		SigningKeyPub:    &signingKeyPub,
-		NextRotation:     item.NextRotation,
-		VerificationKeys: verifyKeys,
-	}
+	keys := toStorageKey(item)
 
 	if err != nil {
 		return fmt.Errorf("%v", err)
@@ -602,39 +612,23 @@ func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) 
 	if err != nil {
 		return fmt.Errorf("%v", err)
 	}
-	signingKeyBytes, _ := nc.SigningKey.MarshalJSON()
-	signingKeyPubBytes, _ := nc.SigningKeyPub.MarshalJSON()
+	updatedKey := toDynamoKey(nc)
 
-	ncVerifyKeys := make([]VerificationKey, len(nc.VerificationKeys))
+	if item.ID != "" {
+		update := expression.Set(expression.Name("SigningKey"), expression.Value(updatedKey.SigningKey))
+		update.Set(expression.Name("SigningKeyPub"), expression.Value(updatedKey.SigningKeyPub))
+		update.Set(expression.Name("VerificationKeys"), expression.Value(updatedKey.VerificationKeys))
+		update.Set(expression.Name("NextRotation"), expression.Value(updatedKey.NextRotation))
+		expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
-	for i, v := range nc.VerificationKeys {
-		pbBytes, _ := v.PublicKey.MarshalJSON()
-		ncVerifyKeys[i] = VerificationKey{
-			Key:    pbBytes,
-			Expiry: v.Expiry,
+		if err != nil {
+			c.logger.Infof("Couldn't build expression for update: %v", err)
+		} else {
+			c.updateItem(keysName, keysName, expr)
 		}
-	}
-
-	new_key := Keys{
-		ContentType:      keysName,
-		ID:               keysName,
-		SigningKey:       signingKeyBytes,
-		SigningKeyPub:    signingKeyPubBytes,
-		VerificationKeys: ncVerifyKeys,
-		NextRotation:     nc.NextRotation,
-	}
-
-	nc_map, _ := attributevalue.MarshalMap(new_key)
-
-	input := &dynamodb.PutItemInput{
-		TableName: aws.String(c.table),
-		Item:      nc_map,
-	}
-
-	_, err = c.db.PutItem(context.TODO(), input)
-
-	if err != nil {
-		c.logger.Infof("Error in putitem: %v\n", err)
+	} else {
+		updateKeyAttrs, _ := attributevalue.MarshalMap(updatedKey)
+		c.putItem(updateKeyAttrs)
 	}
 
 	return nil

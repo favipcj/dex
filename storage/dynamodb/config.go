@@ -3,6 +3,7 @@ package dynamodb
 import (
 	"context"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/dexidp/dex/pkg/log"
@@ -35,21 +36,30 @@ func (dbd *DynamoDB) Open(logger log.Logger) (storage.Storage, error) {
 }
 
 func (dbd *DynamoDB) open(logger log.Logger) (*conn, error) {
-	cfg, err := config.LoadDefaultConfig(
-		context.TODO(),
-		config.WithRegion(dbd.Region),
-		config.WithSharedConfigProfile(dbd.ProfileName),
-	)
+	var cfg aws.Config
 
-	if err != nil {
-		return nil, err
+	if dbd.ProfileName != "" {
+		var err error
+		cfg, err = config.LoadDefaultConfig(
+			context.TODO(),
+			config.WithRegion(dbd.Region),
+			config.WithSharedConfigProfile(dbd.ProfileName),
+		)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		cfg, err = config.LoadDefaultConfig(
+			context.TODO(),
+			config.WithRegion(dbd.Region),
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	svc := dynamodb.NewFromConfig(cfg)
-
-	if err != nil {
-		return nil, err
-	}
 
 	c := &conn{
 		db:     svc,
