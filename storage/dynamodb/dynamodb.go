@@ -429,12 +429,11 @@ func (c *conn) GetDeviceToken(deviceCode string) (storage.DeviceToken, error) {
 	}, nil
 }
 
-func (c *conn) getItemsWithKeyPrefix(content_type string) ([]map[string]types.AttributeValue, error) {
+func (c *conn) getItemsWithContentType(content_type string) ([]map[string]types.AttributeValue, error) {
 	keyEx := expression.Key("ContentType").Equal(expression.Value(content_type))
 	expr, _ := expression.NewBuilder().WithKeyCondition(keyEx).Build()
 	queryInput := dynamodb.QueryInput{
 		TableName:                 aws.String(c.table),
-		IndexName:                 aws.String("ContentType-index"),
 		ExpressionAttributeNames:  expr.Names(),
 		ExpressionAttributeValues: expr.Values(),
 		KeyConditionExpression:    expr.KeyCondition(),
@@ -453,7 +452,7 @@ func (c *conn) ListClients() ([]storage.Client, error) {
 	var clientsDbd []Client
 	var err error
 
-	clientsResp, err := c.getItemsWithKeyPrefix(clientKey)
+	clientsResp, err := c.getItemsWithContentType(clientKey)
 
 	if err != nil {
 		c.logger.Infof("Could not list clients: %v\n", err)
@@ -478,7 +477,7 @@ func (c *conn) ListRefreshTokens() ([]storage.RefreshToken, error) {
 	var tokensDbd []RefreshToken
 	var err error
 
-	tokenResp, err := c.getItemsWithKeyPrefix(refreshTokenKey)
+	tokenResp, err := c.getItemsWithContentType(refreshTokenKey)
 
 	if err != nil {
 		c.logger.Infof("Could not list refresh tokens: %v\n", err)
@@ -503,7 +502,7 @@ func (c *conn) ListPasswords() ([]storage.Password, error) {
 	var passwordsDbd []Password
 	var err error
 
-	passwordsResp, err := c.getItemsWithKeyPrefix(passwordKey)
+	passwordsResp, err := c.getItemsWithContentType(passwordKey)
 
 	if err != nil {
 		c.logger.Infof("Could not list passwords: %v\n", err)
@@ -528,7 +527,7 @@ func (c *conn) ListConnectors() ([]storage.Connector, error) {
 	var connectorsDbd []Connector
 	var err error
 
-	connectorResp, err := c.getItemsWithKeyPrefix(connectorKey)
+	connectorResp, err := c.getItemsWithContentType(connectorKey)
 
 	if err != nil {
 		c.logger.Infof("Could not list connectors: %v\n", err)

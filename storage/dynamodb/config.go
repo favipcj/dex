@@ -10,17 +10,10 @@ import (
 	"github.com/dexidp/dex/storage"
 )
 
-const (
-	dexIndexName = "index"
-)
-
-var createBucketIfNotExists = false
-
 type AWSConfig struct {
 	ProfileName string
 	Region      string
 	Table       string
-	Endpoint    string
 }
 
 type DynamoDB struct {
