@@ -598,22 +598,25 @@ func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) 
 		return fmt.Errorf("%v", err)
 	}
 
-	var item Keys
-	err = attributevalue.UnmarshalMap(resp.Item, &item)
-	keys := toStorageKey(item)
-
-	if err != nil {
-		return fmt.Errorf("%v", err)
+	var keys storage.Keys
+	if resp.Item != nil {
+		var dynamoKey Keys
+		if attributevalue.UnmarshalMap(resp.Item, &dynamoKey) != nil {
+			return fmt.Errorf("%v", err)
+		}
+		keys = toStorageKey(dynamoKey)
+	} else {
+		keys = storage.Keys{}
 	}
 
 	nc, err := updater(keys)
-
 	if err != nil {
 		return fmt.Errorf("%v", err)
 	}
+
 	updatedKey := toDynamoKey(nc)
 
-	if item.ID != "" {
+	if resp.Item != nil {
 		update := expression.Set(expression.Name("SigningKey"), expression.Value(updatedKey.SigningKey))
 		update.Set(expression.Name("SigningKeyPub"), expression.Value(updatedKey.SigningKeyPub))
 		update.Set(expression.Name("VerificationKeys"), expression.Value(updatedKey.VerificationKeys))
@@ -638,10 +641,7 @@ func (c *conn) UpdateAuthRequest(id string, updater func(a storage.AuthRequest) 
 	resp, _ := c.getItem(authRequestKey, id)
 	_ = attributevalue.UnmarshalMap(resp.Item, &authCurrent)
 
-	c.logger.Infof("Updating auth request: %v. Name: %v", id, authCurrent.Request.Claims.Username)
-
 	newAuth, _ := updater(authCurrent.Request)
-	c.logger.Infof("Update data for auth request: %v. Name: %v", newAuth.ID, newAuth.Claims.Username)
 	update := expression.Set(expression.Name("Request"), expression.Value(newAuth))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
