@@ -25,17 +25,14 @@ const (
 	offlineSessionKey = "dex-offlinesession"
 	connectorKey      = "dex-connector"
 	keysName          = "dex-openid-connect-keys"
+	contentTypeKey    = "pk"
+	idKey             = "sk"
 )
 
 type conn struct {
 	db     *dynamodb.Client
 	table  string
 	logger log.Logger
-}
-
-func keyID(prefix string, id string) string { return prefix + "-" + id }
-func keySession(prefix string, id string, connId string) string {
-	return prefix + "-" + strings.ToLower(id+"-"+connId)
 }
 
 func toStorageKey(key Keys) storage.Keys {
@@ -98,15 +95,15 @@ func (c *conn) putItem(data map[string]types.AttributeValue) {
 	_, err := c.db.PutItem(context.TODO(), input)
 
 	if err != nil {
-		c.logger.Infof("Error in putitem: %v\n", err)
+		c.logger.Infof("Error in putitem: %v", err)
 	}
 }
 
 func (c *conn) getItem(content_type string, id string) (*dynamodb.GetItemOutput, error) {
 	return c.db.GetItem(context.TODO(), &dynamodb.GetItemInput{
 		Key: map[string]types.AttributeValue{
-			"ContentType": &types.AttributeValueMemberS{Value: content_type},
-			"ID":          &types.AttributeValueMemberS{Value: id},
+			contentTypeKey: &types.AttributeValueMemberS{Value: content_type},
+			idKey:          &types.AttributeValueMemberS{Value: id},
 		},
 		TableName: aws.String(c.table)},
 	)
@@ -115,8 +112,8 @@ func (c *conn) getItem(content_type string, id string) (*dynamodb.GetItemOutput,
 func (c *conn) deleteItem(content_type string, id string) error {
 	_, err := c.db.DeleteItem(context.TODO(), &dynamodb.DeleteItemInput{
 		Key: map[string]types.AttributeValue{
-			"ContentType": &types.AttributeValueMemberS{Value: content_type},
-			"ID":          &types.AttributeValueMemberS{Value: id},
+			contentTypeKey: &types.AttributeValueMemberS{Value: content_type},
+			idKey:          &types.AttributeValueMemberS{Value: id},
 		},
 		TableName: aws.String(c.table),
 	})
@@ -128,8 +125,8 @@ func (c *conn) updateItem(contentType string, id string, expr expression.Express
 	_, err := c.db.UpdateItem(context.TODO(), &dynamodb.UpdateItemInput{
 		TableName: aws.String(c.table),
 		Key: map[string]types.AttributeValue{
-			"ContentType": &types.AttributeValueMemberS{Value: contentType},
-			"ID":          &types.AttributeValueMemberS{Value: id},
+			contentTypeKey: &types.AttributeValueMemberS{Value: contentType},
+			idKey:          &types.AttributeValueMemberS{Value: id},
 		},
 		ExpressionAttributeNames:  expr.Names(),
 		ExpressionAttributeValues: expr.Values(),
@@ -153,7 +150,7 @@ func (c *conn) CreateAuthRequest(a storage.AuthRequest) error {
 
 	authRequestData, e := attributevalue.MarshalMap(authRequestDbd)
 	if e != nil {
-		c.logger.Infof("%v\n", e)
+		c.logger.Infof("%v", e)
 	}
 
 	c.putItem(authRequestData)
@@ -307,14 +304,14 @@ func (c *conn) GetKeys() (storage.Keys, error) {
 	keyDbd := keysName
 	resp, err := c.db.GetItem(context.TODO(), &dynamodb.GetItemInput{
 		Key: map[string]types.AttributeValue{
-			"ContentType": &types.AttributeValueMemberS{Value: keyDbd},
-			"ID":          &types.AttributeValueMemberS{Value: keyDbd},
+			contentTypeKey: &types.AttributeValueMemberS{Value: keyDbd},
+			idKey:          &types.AttributeValueMemberS{Value: keyDbd},
 		},
 		TableName: aws.String(c.table)},
 	)
 
 	if err != nil {
-		c.logger.Infof("%v\n", err)
+		c.logger.Infof("%v", err)
 		return keys, fmt.Errorf("%v", err)
 	}
 
@@ -324,7 +321,7 @@ func (c *conn) GetKeys() (storage.Keys, error) {
 	storageKey := toStorageKey(keyResp)
 
 	if err != nil {
-		c.logger.Infof("%v\n", err)
+		c.logger.Infof("%v", err)
 	}
 
 	return storageKey, err
@@ -430,7 +427,7 @@ func (c *conn) GetDeviceToken(deviceCode string) (storage.DeviceToken, error) {
 }
 
 func (c *conn) getItemsWithContentType(content_type string) ([]map[string]types.AttributeValue, error) {
-	keyEx := expression.Key("ContentType").Equal(expression.Value(content_type))
+	keyEx := expression.Key(contentTypeKey).Equal(expression.Value(content_type))
 	expr, _ := expression.NewBuilder().WithKeyCondition(keyEx).Build()
 	queryInput := dynamodb.QueryInput{
 		TableName:                 aws.String(c.table),
@@ -455,13 +452,13 @@ func (c *conn) ListClients() ([]storage.Client, error) {
 	clientsResp, err := c.getItemsWithContentType(clientKey)
 
 	if err != nil {
-		c.logger.Infof("Could not list clients: %v\n", err)
+		c.logger.Infof("Could not list clients: %v", err)
 		return nil, err
 	}
 
 	err = attributevalue.UnmarshalListOfMaps(clientsResp, &clientsDbd)
 	if err != nil {
-		c.logger.Infof("Could not unmarshall list of clients: %v\n", err)
+		c.logger.Infof("Could not unmarshall list of clients: %v", err)
 		return nil, err
 	}
 
@@ -480,13 +477,13 @@ func (c *conn) ListRefreshTokens() ([]storage.RefreshToken, error) {
 	tokenResp, err := c.getItemsWithContentType(refreshTokenKey)
 
 	if err != nil {
-		c.logger.Infof("Could not list refresh tokens: %v\n", err)
+		c.logger.Infof("Could not list refresh tokens: %v", err)
 		return nil, err
 	}
 
 	err = attributevalue.UnmarshalListOfMaps(tokenResp, &tokensDbd)
 	if err != nil {
-		c.logger.Infof("Could not unmarshall list of refresh tokens: %v\n", err)
+		c.logger.Infof("Could not unmarshall list of refresh tokens: %v", err)
 		return nil, err
 	}
 
@@ -505,13 +502,13 @@ func (c *conn) ListPasswords() ([]storage.Password, error) {
 	passwordsResp, err := c.getItemsWithContentType(passwordKey)
 
 	if err != nil {
-		c.logger.Infof("Could not list passwords: %v\n", err)
+		c.logger.Infof("Could not list passwords: %v", err)
 		return nil, err
 	}
 
 	err = attributevalue.UnmarshalListOfMaps(passwordsResp, &passwordsDbd)
 	if err != nil {
-		c.logger.Infof("Could not unmarshall list of passwords: %v\n", err)
+		c.logger.Infof("Could not unmarshall list of passwords: %v", err)
 		return nil, err
 	}
 
@@ -530,13 +527,13 @@ func (c *conn) ListConnectors() ([]storage.Connector, error) {
 	connectorResp, err := c.getItemsWithContentType(connectorKey)
 
 	if err != nil {
-		c.logger.Infof("Could not list connectors: %v\n", err)
+		c.logger.Infof("Could not list connectors: %v", err)
 		return nil, err
 	}
 
 	err = attributevalue.UnmarshalListOfMaps(connectorResp, &connectorsDbd)
 	if err != nil {
-		c.logger.Infof("Could not unmarshall list of connectors: %v\n", err)
+		c.logger.Infof("Could not unmarshall list of connectors: %v", err)
 		return nil, err
 	}
 
@@ -572,7 +569,7 @@ func (c *conn) UpdateClient(id string, updater func(old storage.Client) (storage
 	_ = attributevalue.UnmarshalMap(resp.Item, &client)
 
 	newClient, _ := updater(client.Client)
-	update := expression.Set(expression.Name("Client"), expression.Value(newClient))
+	update := expression.Set(expression.Name("client"), expression.Value(newClient))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
@@ -587,8 +584,8 @@ func (c *conn) UpdateClient(id string, updater func(old storage.Client) (storage
 func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) error {
 	getInput := dynamodb.GetItemInput{
 		Key: map[string]types.AttributeValue{
-			"ID":          &types.AttributeValueMemberS{Value: keysName},
-			"ContentType": &types.AttributeValueMemberS{Value: keysName},
+			idKey:          &types.AttributeValueMemberS{Value: keysName},
+			contentTypeKey: &types.AttributeValueMemberS{Value: keysName},
 		},
 		TableName: aws.String(c.table),
 	}
@@ -617,10 +614,10 @@ func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) 
 	updatedKey := toDynamoKey(nc)
 
 	if resp.Item != nil {
-		update := expression.Set(expression.Name("SigningKey"), expression.Value(updatedKey.SigningKey))
-		update.Set(expression.Name("SigningKeyPub"), expression.Value(updatedKey.SigningKeyPub))
-		update.Set(expression.Name("VerificationKeys"), expression.Value(updatedKey.VerificationKeys))
-		update.Set(expression.Name("NextRotation"), expression.Value(updatedKey.NextRotation))
+		update := expression.Set(expression.Name("signing_key"), expression.Value(updatedKey.SigningKey))
+		update.Set(expression.Name("signing_key_pub"), expression.Value(updatedKey.SigningKeyPub))
+		update.Set(expression.Name("verification_keys"), expression.Value(updatedKey.VerificationKeys))
+		update.Set(expression.Name("next_rotation"), expression.Value(updatedKey.NextRotation))
 		expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 		if err != nil {
@@ -660,7 +657,7 @@ func (c *conn) UpdateRefreshToken(id string, updater func(r storage.RefreshToken
 	_ = attributevalue.UnmarshalMap(resp.Item, &refreshToken)
 
 	newRefreshToken, _ := updater(refreshToken.Token)
-	update := expression.Set(expression.Name("Token"), expression.Value(newRefreshToken))
+	update := expression.Set(expression.Name("token"), expression.Value(newRefreshToken))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
@@ -678,7 +675,7 @@ func (c *conn) UpdatePassword(email string, updater func(p storage.Password) (st
 	_ = attributevalue.UnmarshalMap(resp.Item, &password)
 
 	newPassword, _ := updater(password.Password)
-	update := expression.Set(expression.Name("Password"), expression.Value(newPassword))
+	update := expression.Set(expression.Name("password"), expression.Value(newPassword))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
@@ -697,7 +694,7 @@ func (c *conn) UpdateOfflineSessions(userID string, connID string, updater func(
 	_ = attributevalue.UnmarshalMap(resp.Item, &offlineSession)
 
 	newSession, _ := updater(offlineSession.Session)
-	update := expression.Set(expression.Name("Session"), expression.Value(newSession))
+	update := expression.Set(expression.Name("session"), expression.Value(newSession))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
@@ -715,7 +712,7 @@ func (c *conn) UpdateConnector(id string, updater func(c storage.Connector) (sto
 	_ = attributevalue.UnmarshalMap(resp.Item, &connector)
 
 	newConnector, _ := updater(connector.Connector)
-	update := expression.Set(expression.Name("Connector"), expression.Value(newConnector))
+	update := expression.Set(expression.Name("connector"), expression.Value(newConnector))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
