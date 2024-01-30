@@ -13,7 +13,7 @@ type Client struct {
 }
 
 type AuthCode struct {
-	AuthCode    storage.AuthCode `dynamodbav:"uth_code"`
+	AuthCode    storage.AuthCode `dynamodbav:"auth_code"`
 	TTL         int64            `dynamodbav:"ttl"`
 	ContentType string           `dynamodbav:"pk"`
 	ID          string           `dynamodbav:"sk"`
