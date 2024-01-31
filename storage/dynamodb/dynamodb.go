@@ -86,27 +86,33 @@ func (c *conn) Close() error {
 	return nil
 }
 
-func (c *conn) putItem(data map[string]types.AttributeValue) {
+func (c *conn) putItem(data map[string]types.AttributeValue) error {
 	input := &dynamodb.PutItemInput{
 		TableName: aws.String(c.table),
 		Item:      data,
 	}
-
 	_, err := c.db.PutItem(context.TODO(), input)
 
 	if err != nil {
-		c.logger.Infof("Error in putitem: %v", err)
+		return fmt.Errorf("putting item in dynamodb: %v", err)
+	} else {
+		return nil
 	}
 }
 
 func (c *conn) getItem(content_type string, id string) (*dynamodb.GetItemOutput, error) {
-	return c.db.GetItem(context.TODO(), &dynamodb.GetItemInput{
+	resp, err := c.db.GetItem(context.TODO(), &dynamodb.GetItemInput{
 		Key: map[string]types.AttributeValue{
 			contentTypeKey: &types.AttributeValueMemberS{Value: content_type},
 			idKey:          &types.AttributeValueMemberS{Value: id},
 		},
 		TableName: aws.String(c.table)},
 	)
+	if err != nil {
+		return resp, fmt.Errorf("getting item from dynamodb: %v", err)
+	} else {
+		return resp, nil
+	}
 }
 
 func (c *conn) deleteItem(content_type string, id string) error {
@@ -118,10 +124,14 @@ func (c *conn) deleteItem(content_type string, id string) error {
 		TableName: aws.String(c.table),
 	})
 
-	return err
+	if err != nil {
+		return fmt.Errorf("deleting item in dynamodb: %v", err)
+	} else {
+		return nil
+	}
 }
 
-func (c *conn) updateItem(contentType string, id string, expr expression.Expression) {
+func (c *conn) updateItem(contentType string, id string, expr expression.Expression) error {
 	_, err := c.db.UpdateItem(context.TODO(), &dynamodb.UpdateItemInput{
 		TableName: aws.String(c.table),
 		Key: map[string]types.AttributeValue{
@@ -134,9 +144,31 @@ func (c *conn) updateItem(contentType string, id string, expr expression.Express
 		ReturnValues:              types.ReturnValueUpdatedNew,
 	})
 
+	return err
+}
+
+func (c *conn) getItemsWithContentType(content_type string) ([]map[string]types.AttributeValue, error) {
+	keyEx := expression.Key(contentTypeKey).Equal(expression.Value(content_type))
+	expr, err := expression.NewBuilder().WithKeyCondition(keyEx).Build()
+
 	if err != nil {
-		c.logger.Infof("Could not update %v: %v: %v", contentType, id, err)
+		return nil, fmt.Errorf("failed building query: %v", err)
 	}
+
+	queryInput := dynamodb.QueryInput{
+		TableName:                 aws.String(c.table),
+		ExpressionAttributeNames:  expr.Names(),
+		ExpressionAttributeValues: expr.Values(),
+		KeyConditionExpression:    expr.KeyCondition(),
+	}
+
+	resp, err := c.db.Query(context.TODO(), &queryInput)
+
+	if err != nil {
+		return nil, fmt.Errorf("query to dynamodb failed: %v", err)
+	}
+
+	return resp.Items, nil
 }
 
 func (c *conn) CreateAuthRequest(a storage.AuthRequest) error {
@@ -148,14 +180,12 @@ func (c *conn) CreateAuthRequest(a storage.AuthRequest) error {
 		ID:          a.ID,
 	}
 
-	authRequestData, e := attributevalue.MarshalMap(authRequestDbd)
-	if e != nil {
-		c.logger.Infof("%v", e)
+	authRequestData, err := attributevalue.MarshalMap(authRequestDbd)
+	if err != nil {
+		return err
 	}
 
-	c.putItem(authRequestData)
-
-	return nil
+	return c.putItem(authRequestData)
 }
 
 func (c *conn) CreateClient(cli storage.Client) error {
@@ -165,10 +195,12 @@ func (c *conn) CreateClient(cli storage.Client) error {
 		ID:          cli.ID,
 	}
 
-	clientData, _ := attributevalue.MarshalMap(clientDbd)
-	c.putItem(clientData)
+	clientData, err := attributevalue.MarshalMap(clientDbd)
+	if err != nil {
+		return err
+	}
 
-	return nil
+	return c.putItem(clientData)
 }
 
 func (c *conn) CreateAuthCode(code storage.AuthCode) error {
@@ -180,10 +212,12 @@ func (c *conn) CreateAuthCode(code storage.AuthCode) error {
 		ID:          code.ID,
 	}
 
-	clientData, _ := attributevalue.MarshalMap(codeDbd)
-	c.putItem(clientData)
+	clientData, err := attributevalue.MarshalMap(codeDbd)
+	if err != nil {
+		return err
+	}
 
-	return nil
+	return c.putItem(clientData)
 }
 
 func (c *conn) CreateRefresh(r storage.RefreshToken) error {
@@ -193,10 +227,12 @@ func (c *conn) CreateRefresh(r storage.RefreshToken) error {
 		ID:          r.ID,
 	}
 
-	tokenData, _ := attributevalue.MarshalMap(refreshDbd)
-	c.putItem(tokenData)
+	refreshTokenData, err := attributevalue.MarshalMap(refreshDbd)
+	if err != nil {
+		return err
+	}
 
-	return nil
+	return c.putItem(refreshTokenData)
 }
 
 func (c *conn) CreatePassword(p storage.Password) error {
@@ -206,10 +242,12 @@ func (c *conn) CreatePassword(p storage.Password) error {
 		ID:          strings.ToLower(p.Email),
 	}
 
-	passwordData, _ := attributevalue.MarshalMap(passwordDbd)
-	c.putItem(passwordData)
+	passwordData, err := attributevalue.MarshalMap(passwordDbd)
+	if err != nil {
+		return err
+	}
 
-	return nil
+	return c.putItem(passwordData)
 }
 
 func (c *conn) CreateOfflineSessions(s storage.OfflineSessions) error {
@@ -219,10 +257,12 @@ func (c *conn) CreateOfflineSessions(s storage.OfflineSessions) error {
 		ID:          s.UserID + "-" + s.ConnID,
 	}
 
-	offlineSessionData, _ := attributevalue.MarshalMap(offlineSessionDbd)
-	c.putItem(offlineSessionData)
+	offlineSessionData, err := attributevalue.MarshalMap(offlineSessionDbd)
+	if err != nil {
+		return err
+	}
 
-	return nil
+	return c.putItem(offlineSessionData)
 }
 
 func (c *conn) CreateConnector(con storage.Connector) error {
@@ -232,75 +272,65 @@ func (c *conn) CreateConnector(con storage.Connector) error {
 		ID:          con.ID,
 	}
 
-	connectorData, _ := attributevalue.MarshalMap(connectorDbd)
-	c.putItem(connectorData)
+	connectorData, err := attributevalue.MarshalMap(connectorDbd)
+	if err != nil {
+		return err
+	}
 
-	return nil
+	return c.putItem(connectorData)
 }
 
 func (c *conn) GetAuthRequest(id string) (storage.AuthRequest, error) {
-	var temp storage.AuthRequest
-
 	resp, err := c.getItem(authRequestKey, id)
 
 	if err != nil {
-		return temp, err
+		return storage.AuthRequest{}, err
 	}
 
 	var authRequestDbd AuthRequest
 	err = attributevalue.UnmarshalMap(resp.Item, &authRequestDbd)
-
 	if err != nil {
-		return temp, err
+		return storage.AuthRequest{}, fmt.Errorf("dynamodb unmarshal failed: %v", err)
 	}
 
-	temp = authRequestDbd.Request
-
-	return temp, nil
+	return authRequestDbd.Request, nil
 }
 
 func (c *conn) GetAuthCode(id string) (storage.AuthCode, error) {
-	var temp storage.AuthCode
 	resp, err := c.getItem(authCodeKey, id)
 
 	if err != nil {
-		return temp, err
+		return storage.AuthCode{}, err
 	}
 
 	var authCodeDbd AuthCode
 	err = attributevalue.UnmarshalMap(resp.Item, &authCodeDbd)
 
 	if err != nil {
-		return temp, err
+		return storage.AuthCode{}, fmt.Errorf("dynamodb unmarshal failed: %v", err)
 	}
 
-	temp = authCodeDbd.AuthCode
-
-	return temp, nil
+	return authCodeDbd.AuthCode, nil
 }
 
 func (c *conn) GetClient(id string) (storage.Client, error) {
-	var temp storage.Client
 	resp, err := c.getItem(clientKey, id)
 
 	if err != nil {
-		return temp, err
+		return storage.Client{}, err
 	}
 
 	var clientDbd Client
 	err = attributevalue.UnmarshalMap(resp.Item, &clientDbd)
 
 	if err != nil {
-		return temp, err
+		return storage.Client{}, fmt.Errorf("dynamodb unmarshal failed: %v", err)
 	}
 
-	temp = clientDbd.Client
-
-	return temp, nil
+	return clientDbd.Client, nil
 }
 
 func (c *conn) GetKeys() (storage.Keys, error) {
-	var keys storage.Keys
 	keyDbd := keysName
 	resp, err := c.db.GetItem(context.TODO(), &dynamodb.GetItemInput{
 		Key: map[string]types.AttributeValue{
@@ -311,96 +341,90 @@ func (c *conn) GetKeys() (storage.Keys, error) {
 	)
 
 	if err != nil {
-		c.logger.Infof("%v", err)
-		return keys, fmt.Errorf("%v", err)
+		return storage.Keys{}, err
 	}
 
 	var keyResp Keys
 	err = attributevalue.UnmarshalMap(resp.Item, &keyResp)
+	if err != nil {
+		return storage.Keys{}, fmt.Errorf("dynamodb unmarshal failed: %v", err)
+	}
 
 	storageKey := toStorageKey(keyResp)
 
 	if err != nil {
-		c.logger.Infof("%v", err)
+		return storage.Keys{}, err
 	}
 
 	return storageKey, err
 }
 
 func (c *conn) GetRefresh(id string) (storage.RefreshToken, error) {
-	var temp storage.RefreshToken
 	resp, err := c.getItem(refreshTokenKey, id)
 
 	if err != nil {
-		return temp, err
+		return storage.RefreshToken{}, err
 	}
 
 	var refreshDbd RefreshToken
 	err = attributevalue.UnmarshalMap(resp.Item, &refreshDbd)
 
 	if err != nil {
-		return temp, err
+		return storage.RefreshToken{}, fmt.Errorf("dynamodb error failed: %v", err)
 	}
 
-	temp = refreshDbd.Token
-	return temp, nil
+	return refreshDbd.Token, nil
 }
 
 func (c *conn) GetPassword(email string) (storage.Password, error) {
-	var temp storage.Password
 	resp, err := c.getItem(passwordKey, strings.ToLower(email))
 
 	if err != nil {
-		return temp, err
+		return storage.Password{}, err
 	}
 
 	var passwordDbd Password
 	err = attributevalue.UnmarshalMap(resp.Item, &passwordDbd)
 
 	if err != nil {
-		return temp, err
+		return storage.Password{}, fmt.Errorf("dynamodb unmarshal failed: %v", err)
 	}
 
-	temp = passwordDbd.Password
-	return temp, nil
+	return passwordDbd.Password, nil
 }
 
 func (c *conn) GetOfflineSessions(userID string, connID string) (storage.OfflineSessions, error) {
-	var temp storage.OfflineSessions
 	resp, err := c.getItem(offlineSessionKey, userID+"-"+connID)
 
 	if err != nil {
-		return temp, err
+		return storage.OfflineSessions{}, err
 	}
 
 	var offlineSessionDbd OfflineSessions
 	err = attributevalue.UnmarshalMap(resp.Item, &offlineSessionDbd)
 
 	if err != nil {
-		return temp, err
+		return storage.OfflineSessions{}, fmt.Errorf("dynamodb unmarshal failed: %v", err)
 	}
 
-	temp = offlineSessionDbd.Session
-	return temp, nil
+	return offlineSessionDbd.Session, nil
 }
 
 func (c *conn) GetConnector(id string) (storage.Connector, error) {
-	var temp storage.Connector
 	resp, err := c.getItem(connectorKey, id)
 
 	if err != nil {
-		return temp, err
+		return storage.Connector{}, err
 	}
 
 	var connectorDbd Connector
 	err = attributevalue.UnmarshalMap(resp.Item, &connectorDbd)
 
 	if err != nil {
-		return temp, err
+		return storage.Connector{}, fmt.Errorf("dynamodb unmarshal failed: %v", err)
 	}
 
-	temp = connectorDbd.Connector
-	return temp, nil
+	return connectorDbd.Connector, nil
 }
 
 func (c *conn) GetDeviceRequest(userCode string) (storage.DeviceRequest, error) {
@@ -426,40 +450,17 @@ func (c *conn) GetDeviceToken(deviceCode string) (storage.DeviceToken, error) {
 	}, nil
 }
 
-func (c *conn) getItemsWithContentType(content_type string) ([]map[string]types.AttributeValue, error) {
-	keyEx := expression.Key(contentTypeKey).Equal(expression.Value(content_type))
-	expr, _ := expression.NewBuilder().WithKeyCondition(keyEx).Build()
-	queryInput := dynamodb.QueryInput{
-		TableName:                 aws.String(c.table),
-		ExpressionAttributeNames:  expr.Names(),
-		ExpressionAttributeValues: expr.Values(),
-		KeyConditionExpression:    expr.KeyCondition(),
-	}
-
-	resp, err := c.db.Query(context.TODO(), &queryInput)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return resp.Items, nil
-}
-
 func (c *conn) ListClients() ([]storage.Client, error) {
-	var clientsDbd []Client
-	var err error
-
 	clientsResp, err := c.getItemsWithContentType(clientKey)
 
 	if err != nil {
-		c.logger.Infof("Could not list clients: %v", err)
 		return nil, err
 	}
 
+	var clientsDbd []Client
 	err = attributevalue.UnmarshalListOfMaps(clientsResp, &clientsDbd)
 	if err != nil {
-		c.logger.Infof("Could not unmarshall list of clients: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("dynamodb unmarshal failed: %v", err)
 	}
 
 	clients := make([]storage.Client, len(clientsDbd))
@@ -471,20 +472,16 @@ func (c *conn) ListClients() ([]storage.Client, error) {
 }
 
 func (c *conn) ListRefreshTokens() ([]storage.RefreshToken, error) {
-	var tokensDbd []RefreshToken
-	var err error
-
 	tokenResp, err := c.getItemsWithContentType(refreshTokenKey)
 
 	if err != nil {
-		c.logger.Infof("Could not list refresh tokens: %v", err)
 		return nil, err
 	}
 
+	var tokensDbd []RefreshToken
 	err = attributevalue.UnmarshalListOfMaps(tokenResp, &tokensDbd)
 	if err != nil {
-		c.logger.Infof("Could not unmarshall list of refresh tokens: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("dynamodb unmarshal failed: %v", err)
 	}
 
 	tokens := make([]storage.RefreshToken, len(tokensDbd))
@@ -496,20 +493,16 @@ func (c *conn) ListRefreshTokens() ([]storage.RefreshToken, error) {
 }
 
 func (c *conn) ListPasswords() ([]storage.Password, error) {
-	var passwordsDbd []Password
-	var err error
-
 	passwordsResp, err := c.getItemsWithContentType(passwordKey)
 
 	if err != nil {
-		c.logger.Infof("Could not list passwords: %v", err)
 		return nil, err
 	}
 
+	var passwordsDbd []Password
 	err = attributevalue.UnmarshalListOfMaps(passwordsResp, &passwordsDbd)
 	if err != nil {
-		c.logger.Infof("Could not unmarshall list of passwords: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("dynamodb unmarshal failed: %v", err)
 	}
 
 	passwords := make([]storage.Password, len(passwordsDbd))
@@ -521,20 +514,16 @@ func (c *conn) ListPasswords() ([]storage.Password, error) {
 }
 
 func (c *conn) ListConnectors() ([]storage.Connector, error) {
-	var connectorsDbd []Connector
-	var err error
-
 	connectorResp, err := c.getItemsWithContentType(connectorKey)
 
 	if err != nil {
-		c.logger.Infof("Could not list connectors: %v", err)
 		return nil, err
 	}
 
+	var connectorsDbd []Connector
 	err = attributevalue.UnmarshalListOfMaps(connectorResp, &connectorsDbd)
 	if err != nil {
-		c.logger.Infof("Could not unmarshall list of connectors: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("dynamodb unmarshal failed: %v", err)
 	}
 
 	connectors := make([]storage.Connector, len(connectorsDbd))
@@ -564,21 +553,31 @@ func (c *conn) DeleteOfflineSessions(userID string, connID string) error {
 func (c *conn) DeleteConnector(id string) error { return c.deleteItem(connectorKey, id) }
 
 func (c *conn) UpdateClient(id string, updater func(old storage.Client) (storage.Client, error)) error {
-	var client Client
-	resp, _ := c.getItem(clientKey, id)
-	_ = attributevalue.UnmarshalMap(resp.Item, &client)
+	resp, err := c.getItem(clientKey, id)
+	if err != nil {
+		return err
+	}
 
-	newClient, _ := updater(client.Client)
+	var client Client
+	err = attributevalue.UnmarshalMap(resp.Item, &client)
+	if err != nil {
+		return fmt.Errorf("dynamodb unmarshal failed: %v", err)
+	}
+
+	newClient, err := updater(client.Client)
+	if err != nil {
+		return err
+	}
+
 	update := expression.Set(expression.Name("client"), expression.Value(newClient))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
-		c.logger.Infof("Couldn't build expression for update: %v", err)
+		return err
 	} else {
 		c.updateItem(clientKey, id, expr)
+		return nil
 	}
-
-	return nil
 }
 
 func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) error {
@@ -592,14 +591,14 @@ func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) 
 
 	resp, err := c.db.GetItem(context.TODO(), &getInput)
 	if err != nil {
-		return fmt.Errorf("%v", err)
+		return err
 	}
 
 	var keys storage.Keys
 	if resp.Item != nil {
 		var dynamoKey Keys
-		if attributevalue.UnmarshalMap(resp.Item, &dynamoKey) != nil {
-			return fmt.Errorf("%v", err)
+		if err = attributevalue.UnmarshalMap(resp.Item, &dynamoKey); err != nil {
+			return fmt.Errorf("dynamodb unmarshal failed: %v", err)
 		}
 		keys = toStorageKey(dynamoKey)
 	} else {
@@ -608,7 +607,7 @@ func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) 
 
 	nc, err := updater(keys)
 	if err != nil {
-		return fmt.Errorf("%v", err)
+		return err
 	}
 
 	updatedKey := toDynamoKey(nc)
@@ -621,112 +620,158 @@ func (c *conn) UpdateKeys(updater func(old storage.Keys) (storage.Keys, error)) 
 		expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 		if err != nil {
-			c.logger.Infof("Couldn't build expression for update: %v", err)
+			return err
 		} else {
-			c.updateItem(keysName, keysName, expr)
+			return c.updateItem(keysName, keysName, expr)
 		}
 	} else {
-		updateKeyAttrs, _ := attributevalue.MarshalMap(updatedKey)
-		c.putItem(updateKeyAttrs)
+		updateKeyAttrs, err := attributevalue.MarshalMap(updatedKey)
+		if err != nil {
+			return err
+		} else {
+			return c.putItem(updateKeyAttrs)
+		}
 	}
-
-	return nil
 }
 
 func (c *conn) UpdateAuthRequest(id string, updater func(a storage.AuthRequest) (storage.AuthRequest, error)) error {
-	var authCurrent AuthRequest
-	resp, _ := c.getItem(authRequestKey, id)
-	_ = attributevalue.UnmarshalMap(resp.Item, &authCurrent)
+	resp, err := c.getItem(authRequestKey, id)
+	if err != nil {
+		return err
+	}
 
-	newAuth, _ := updater(authCurrent.Request)
+	var authCurrent AuthRequest
+	err = attributevalue.UnmarshalMap(resp.Item, &authCurrent)
+	if err != nil {
+		return fmt.Errorf("dynamodb unmarshal failed: %v", err)
+	}
+
+	newAuth, err := updater(authCurrent.Request)
+	if err != nil {
+		return err
+	}
+
 	update := expression.Set(expression.Name("Request"), expression.Value(newAuth))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
-		c.logger.Infof("Couldn't build expression for update: %v", err)
+		return err
 	} else {
-		c.updateItem(authRequestKey, id, expr)
+		return c.updateItem(authRequestKey, id, expr)
 	}
-
-	return nil
 }
 
 func (c *conn) UpdateRefreshToken(id string, updater func(r storage.RefreshToken) (storage.RefreshToken, error)) error {
-	var refreshToken RefreshToken
-	resp, _ := c.getItem(refreshTokenKey, id)
-	_ = attributevalue.UnmarshalMap(resp.Item, &refreshToken)
+	resp, err := c.getItem(refreshTokenKey, id)
+	if err != nil {
+		return err
+	}
 
-	newRefreshToken, _ := updater(refreshToken.Token)
+	var refreshToken RefreshToken
+	err = attributevalue.UnmarshalMap(resp.Item, &refreshToken)
+	if err != nil {
+		return fmt.Errorf("dynamodb unmarshal failed: %v", err)
+	}
+
+	newRefreshToken, err := updater(refreshToken.Token)
+	if err != nil {
+		return err
+	}
+
 	update := expression.Set(expression.Name("token"), expression.Value(newRefreshToken))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
-		c.logger.Infof("Couldn't build expression for update: %v", err)
+		return err
 	} else {
-		c.updateItem(refreshTokenKey, id, expr)
+		return c.updateItem(refreshTokenKey, id, expr)
 	}
-
-	return nil
 }
 
 func (c *conn) UpdatePassword(email string, updater func(p storage.Password) (storage.Password, error)) error {
-	var password Password
-	resp, _ := c.getItem(passwordKey, email)
-	_ = attributevalue.UnmarshalMap(resp.Item, &password)
+	resp, err := c.getItem(passwordKey, email)
+	if err != nil {
+		return err
+	}
 
-	newPassword, _ := updater(password.Password)
+	var password Password
+	err = attributevalue.UnmarshalMap(resp.Item, &password)
+	if err != nil {
+		return fmt.Errorf("dynamodb unmarshal failed: %v", err)
+	}
+
+	newPassword, err := updater(password.Password)
+	if err != nil {
+		return err
+	}
+
 	update := expression.Set(expression.Name("password"), expression.Value(newPassword))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
-		c.logger.Infof("Couldn't build expression for update: %v", err)
+		return err
 	} else {
-		c.updateItem(passwordKey, email, expr)
+		return c.updateItem(passwordKey, email, expr)
 	}
-
-	return nil
 }
 
 func (c *conn) UpdateOfflineSessions(userID string, connID string, updater func(s storage.OfflineSessions) (storage.OfflineSessions, error)) error {
-	var offlineSession OfflineSessions
 	id := userID + "-" + connID
-	resp, _ := c.getItem(passwordKey, id)
-	_ = attributevalue.UnmarshalMap(resp.Item, &offlineSession)
+	resp, err := c.getItem(passwordKey, id)
+	if err != nil {
+		return err
+	}
 
-	newSession, _ := updater(offlineSession.Session)
+	var offlineSession OfflineSessions
+	err = attributevalue.UnmarshalMap(resp.Item, &offlineSession)
+	if err != nil {
+		return fmt.Errorf("dynamodb unmarshal failed: %v", err)
+	}
+
+	newSession, err := updater(offlineSession.Session)
+	if err != nil {
+		return err
+	}
+
 	update := expression.Set(expression.Name("session"), expression.Value(newSession))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
-		c.logger.Infof("Couldn't build expression for update: %v", err)
+		return err
 	} else {
-		c.updateItem(offlineSessionKey, id, expr)
+		return c.updateItem(offlineSessionKey, id, expr)
 	}
-
-	return nil
 }
 
 func (c *conn) UpdateConnector(id string, updater func(c storage.Connector) (storage.Connector, error)) error {
-	var connector Connector
-	resp, _ := c.getItem(passwordKey, id)
-	_ = attributevalue.UnmarshalMap(resp.Item, &connector)
+	resp, err := c.getItem(passwordKey, id)
+	if err != nil {
+		return err
+	}
 
-	newConnector, _ := updater(connector.Connector)
+	var connector Connector
+	err = attributevalue.UnmarshalMap(resp.Item, &connector)
+	if err != nil {
+		return fmt.Errorf("dynamodb unmarshal failed: %v", err)
+	}
+
+	newConnector, err := updater(connector.Connector)
+	if err != nil {
+		return err
+	}
+
 	update := expression.Set(expression.Name("connector"), expression.Value(newConnector))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
-		c.logger.Infof("Couldn't build expression for update: %v", err)
+		return err
 	} else {
-		c.updateItem(connectorKey, id, expr)
+		return c.updateItem(connectorKey, id, expr)
 	}
-
-	return nil
 }
 
 func (c *conn) GarbageCollect(now time.Time) (storage.GCResult, error) {
-	var temp storage.GCResult
-	return temp, nil
+	return storage.GCResult{}, nil
 }
 
 func (c *conn) CreateDeviceRequest(d storage.DeviceRequest) error { return nil }
