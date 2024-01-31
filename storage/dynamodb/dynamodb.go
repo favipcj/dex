@@ -651,7 +651,7 @@ func (c *conn) UpdateAuthRequest(id string, updater func(a storage.AuthRequest) 
 		return err
 	}
 
-	update := expression.Set(expression.Name("Request"), expression.Value(newAuth))
+	update := expression.Set(expression.Name("request"), expression.Value(newAuth))
 	expr, err := expression.NewBuilder().WithUpdate(update).Build()
 
 	if err != nil {
