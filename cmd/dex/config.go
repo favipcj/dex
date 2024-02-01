@@ -14,6 +14,7 @@ import (
 	"github.com/dexidp/dex/server"
 	"github.com/dexidp/dex/storage"
 	"github.com/dexidp/dex/storage/couchbase"
+	"github.com/dexidp/dex/storage/dynamodb"
 	"github.com/dexidp/dex/storage/ent"
 	"github.com/dexidp/dex/storage/etcd"
 	"github.com/dexidp/dex/storage/kubernetes"
@@ -218,6 +219,7 @@ var storages = map[string]func() StorageConfig{
 	"postgres":   getORMBasedSQLStorage(&sql.Postgres{}, &ent.Postgres{}),
 	"mysql":      getORMBasedSQLStorage(&sql.MySQL{}, &ent.MySQL{}),
 	"couchbase":  func() StorageConfig { return new(couchbase.Couchbase) },
+	"dynamodb":   func() StorageConfig { return new(dynamodb.DynamoDB) },
 }
 
 // isExpandEnvEnabled returns if os.ExpandEnv should be used for each storage and connector config.
