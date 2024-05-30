@@ -108,8 +108,12 @@ func (c *conn) getItem(content_type string, id string) (*dynamodb.GetItemOutput,
 		},
 		TableName: aws.String(c.table)},
 	)
+
+	// Check for storage.ErrorNotFound
 	if err != nil {
 		return resp, fmt.Errorf("getting item from dynamodb: %v", err)
+	} else if len(resp.Item) < 1 {
+		return resp, storage.ErrNotFound
 	} else {
 		return resp, nil
 	}
@@ -351,11 +355,6 @@ func (c *conn) GetKeys() (storage.Keys, error) {
 	}
 
 	storageKey := toStorageKey(keyResp)
-
-	if err != nil {
-		return storage.Keys{}, err
-	}
-
 	return storageKey, err
 }
 
