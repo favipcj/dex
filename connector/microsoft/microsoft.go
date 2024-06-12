@@ -27,8 +27,8 @@ type GroupNameFormat string
 
 // Possible values for GroupNameFormat
 const (
-	GroupID   GroupNameFormat = "id"
-	GroupName GroupNameFormat = "name"
+	GroupID   string = "id"
+	GroupName string = "name"
 )
 
 const (
@@ -50,7 +50,7 @@ type Config struct {
 	Tenant               string          `json:"tenant"`
 	OnlySecurityGroups   bool            `json:"onlySecurityGroups"`
 	Groups               []string        `json:"groups"`
-	GroupNameFormat      GroupNameFormat `json:"groupNameFormat"`
+	GroupNameFormat      string          `json:"groupNameFormat"`
 	UseGroupsAsWhitelist bool            `json:"useGroupsAsWhitelist"`
 	EmailToLowercase     bool            `json:"emailToLowercase"`
 
@@ -118,7 +118,7 @@ type microsoftConnector struct {
 	clientSecret         string
 	tenant               string
 	onlySecurityGroups   bool
-	groupNameFormat      GroupNameFormat
+	groupNameFormat      string
 	groups               []string
 	useGroupsAsWhitelist bool
 	logger               log.Logger
